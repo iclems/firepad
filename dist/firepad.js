@@ -1302,7 +1302,7 @@ firepad.FirebaseAdapter = (function (global) {
   // Save a checkpoint every 100 edits.
   var CHECKPOINT_FREQUENCY = 100;
 
-  function FirebaseAdapter (ref, userId, userColor) {
+  function FirebaseAdapter (ref, userId, userColor, history) {
     this.ref_ = ref;
     this.ready_ = false;
     this.firebaseCallbacks_ = [];
@@ -1335,7 +1335,7 @@ firepad.FirebaseAdapter = (function (global) {
 
     // Avoid triggering any events until our callers have had a chance to attach their listeners.
     setTimeout(function() {
-      self.monitorHistory_();
+      self.monitorHistory_(history);
     }, 0);
 
     // Once we're initialized, start tracking users' cursors.
@@ -1469,28 +1469,54 @@ firepad.FirebaseAdapter = (function (global) {
       self.trigger('cursor', userId, null);
     });
   };
-
-  FirebaseAdapter.prototype.monitorHistory_ = function() {
-    var self = this;
-    // Get the latest checkpoint as a starting point so we don't have to re-play entire history.
-    this.ref_.child('checkpoint').once('value', function(s) {
-      if (self.zombie_) { return; } // just in case we were cleaned up before we got the checkpoint data.
-      var revisionId = s.child('id').val(),  op = s.child('o').val(), author = s.child('a').val();
+  
+  FirebaseAdapter.prototype.monitorHistoryWithCheckpoint_ = function(revisionId, op, author, startAt) {
+      if (this.zombie_) { return; } // just in case we were cleaned up before we got the checkpoint data.
       if (op != null && revisionId != null && author !== null) {
-        self.pendingReceivedRevisions_[revisionId] = { o: op, a: author };
-        self.checkpointRevision_ = revisionFromId(revisionId);
-        self.monitorHistoryStartingAt_(self.checkpointRevision_ + 1);
+        if (!this.pendingReceivedRevisions_[revisionId]) {
+          this.pendingReceivedRevisions_[revisionId] = { o: op, a: author };
+        }
+        this.checkpointRevision_ = revisionFromId(revisionId);
+        this.monitorHistoryStartingAt_((startAt || this.checkpointRevision_) + 1);
       } else {
-        self.checkpointRevision_ = 0;
-        self.monitorHistoryStartingAt_(self.checkpointRevision_);
+        this.checkpointRevision_ = 0;
+        this.monitorHistoryStartingAt_(this.checkpointRevision_);
       }
-    });
+  };
+
+  FirebaseAdapter.prototype.monitorHistory_ = function(history) {
+    var self = this;
+    if (history) {
+      this.hasLocalHistory = true;
+      var firstRevisionId = lastRevisionId = null;
+      for (var revisionId in history) {
+        var revision = history[revisionId];
+        if (!firstRevisionId) {
+          firstRevisionId = revisionId;
+        }
+        this.pendingReceivedRevisions_[revisionId] = history[revisionId];
+        lastRevisionId = revisionFromId(revisionId);
+      }
+      this.monitorHistoryWithCheckpoint_(firstRevisionId, firstRevisionId, firstRevisionId, lastRevisionId);
+    }
+    else {
+      // Get the latest checkpoint as a starting point so we don't have to re-play entire history.
+      this.ref_.child('checkpoint').once('value', function(s) {
+        if (self.zombie_) { return; } // just in case we were cleaned up before we got the checkpoint data.
+        var revisionId = s.child('id').val(),  op = s.child('o').val(), author = s.child('a').val();
+        self.monitorHistoryWithCheckpoint_(revisionId, op, author);
+      });
+    }
   };
 
   FirebaseAdapter.prototype.monitorHistoryStartingAt_ = function(revision) {
     var historyRef = this.ref_.child('history').startAt(null, revisionToId(revision));
     var self = this;
 
+    if (this.hasLocalHistory) {
+      this.handleInitialRevisions_();
+    }
+      
     setTimeout(function() {
       self.firebaseOn_(historyRef, 'child_added', function(revisionSnapshot) {
         var revisionId = revisionSnapshot.name();
@@ -1500,9 +1526,11 @@ firepad.FirebaseAdapter = (function (global) {
         }
       });
 
-      historyRef.once('value', function() {
-        self.handleInitialRevisions_();
-      });
+      if (!self.hasLocalHistory) {
+        historyRef.once('value', function() {
+          self.handleInitialRevisions_();
+        }); 
+      }
     }, 0);
   };
 
@@ -4737,8 +4765,8 @@ firepad.Firepad = (function(global) {
   var CodeMirror = global.CodeMirror;
   var ace = global.ace;
 
-  function Firepad(ref, place, options) {
-    if (!(this instanceof Firepad)) { return new Firepad(ref, place, options); }
+  function Firepad(ref, place, options, history) {
+    if (!(this instanceof Firepad)) { return new Firepad(ref, place, options, history); }
 
     if (!CodeMirror && !ace) {
       throw new Error('Couldn\'t find CodeMirror or ACE.  Did you forget to include codemirror.js or ace.js?');
@@ -4800,7 +4828,7 @@ firepad.Firepad = (function(global) {
     this.entityManager_ = new EntityManager();
     this.registerBuiltinEntities_();
 
-    this.firebaseAdapter_ = new FirebaseAdapter(ref, userId, userColor);
+    this.firebaseAdapter_ = new FirebaseAdapter(ref, userId, userColor, history);
     if (this.codeMirror_) {
       this.richTextCodeMirror_ = new RichTextCodeMirror(this.codeMirror_, this.entityManager_, { cssPrefix: 'firepad-' });
       this.editorAdapter_ = new RichTextCodeMirrorAdapter(this.richTextCodeMirror_);

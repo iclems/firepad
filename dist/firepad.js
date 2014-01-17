@@ -5512,5 +5512,6 @@ firepad.Firepad.LineFormatting = firepad.LineFormatting;
 firepad.Firepad.Line = firepad.Line;
 
 firepad.Firepad.TextOperation = firepad.TextOperation;
+firepad.Firepad.FirebaseAdapter = firepad.FirebaseAdapter;
 
 return firepad.Firepad; })();

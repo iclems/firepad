@@ -4771,7 +4771,7 @@ firepad.Firepad = (function(global) {
   var ace = global.ace;
 
   function Firepad(ref, place, options, history) {
-    if (!(this instanceof Firepad)) { return new Firepad(ref, place, options, history); }
+    if (!(this instanceof Firepad)) { return new Firepad(ref, place, options); }
 
     if (!CodeMirror && !ace) {
       throw new Error('Couldn\'t find CodeMirror or ACE.  Did you forget to include codemirror.js or ace.js?');
@@ -4832,6 +4832,8 @@ firepad.Firepad = (function(global) {
 
     this.entityManager_ = new EntityManager();
     this.registerBuiltinEntities_();
+
+    var history = this.getOption('history', false);
 
     this.firebaseAdapter_ = new FirebaseAdapter(ref, userId, userColor, history);
     if (this.codeMirror_) {
